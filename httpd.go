@@ -10,6 +10,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log"
 	"mime"
@@ -24,7 +25,7 @@ import (
 
 const DOCUMENT_ROOT = "/Users/frieder/Documents/go/httpd/html"
 const PORT = 8080
-const TIMEOUT = 5
+const TIMEOUT = 10
 const MAX_REQUESTS = 100
 
 func main() {
@@ -64,6 +65,10 @@ func handleConnection(conn net.Conn) {
 		requestLine, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
+				// if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// 	log.Printf("Timeout reading from connection")
+				// 	return
+				// }
 				log.Printf("Error reading from connection: %v", err)
 			} else {
 				log.Printf("Unexpected EOF in request-line")
@@ -118,6 +123,7 @@ func handleConnection(conn net.Conn) {
 		contentType := "text/plain"
 		cleanPath := filepath.Clean(decodedPath)
 		localFilePath := filepath.Join(DOCUMENT_ROOT, cleanPath)
+		etag := ""
 
 		fileContent, err := os.ReadFile(localFilePath)
 		if err != nil {
@@ -137,6 +143,23 @@ func handleConnection(conn net.Conn) {
 			ext := filepath.Ext(localFilePath)
 			contentType = mime.TypeByExtension(ext)
 			status = 200
+			// Generate Entity Tag for caching
+			etag = fmt.Sprintf("\"%x\"", getFNVHash(fileContent))
+
+			// The client sends the header "If-None-Match" with the last Etag they have in memory for this URL
+			// The server compares the client's ETag (sent with If-None-Match) with the ETag for its
+			// current version of the resource, and if both values match (that is, the resource has
+			// not changed), the server sends back a 304 Not Modified status, without a body, which
+			// tells the client that the cached version of the response is still good to use (fresh).
+			// see https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag
+			clientEtag := headers.Get("If-None-Match")
+			if clientEtag != "" {
+				if clientEtag == etag {
+					// Yup, we got the same file, just use that !
+					status = 304
+					fileContent = []byte("") // Ensure no body is sent
+				}
+			}
 		}
 
 		// Access log
@@ -146,6 +169,10 @@ func handleConnection(conn net.Conn) {
 		responseHeaders.Add("Server", "flo's mini httpd")
 		responseHeaders.Add("Date", time.Now().UTC().Format(time.RFC1123))
 		responseHeaders.Add("Content-Type", contentType)
+
+		if etag != "" {
+			responseHeaders.Add("ETag", etag)
+		}
 
 		// Set keep-alive header
 		if headers.Get("Connection") == "keep-alive" {
@@ -190,14 +217,14 @@ func readHeaders(reader *bufio.Reader) http.Header {
 
 		log.Printf(line)
 
-		// Empty line means we reached the end of the headers
+		// Empty line means we reached the end of the headers (since we removed CRLF with the trim)
 		if line == "" {
 			break
 		}
 
 		// Get KV pair
 		// Split in exactly two parts because there might be colons in the values (cookies, user agent, etc)
-		headerSlice := strings.SplitN(line, ": ", 2)
+		headerSlice := strings.SplitN(line, ":", 2)
 
 		if len(headerSlice) != 2 {
 			log.Printf("Incorrect header slice (%d parts)", len(headerSlice))
@@ -227,7 +254,16 @@ func buildResponse(status int, body []byte, responseHeaders http.Header) []byte 
 		}
 	}
 
+	// Signify the end of the header section using CRLF
 	header += "\r\n"
 
 	return append([]byte(header), body...)
+}
+
+func getFNVHash(blob []byte) uint64 {
+	// Fast non cryptographic hash
+	// https://hackernoon.com/modern-hashing-with-go-a-guide
+	h := fnv.New64a()
+	h.Write(blob)
+	return h.Sum64()
 }
