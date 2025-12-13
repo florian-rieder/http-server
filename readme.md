@@ -6,6 +6,12 @@ It's a little toy project for me to learn the fundamentals of HTTP and web serve
 
 You probably shouldn't be using this in any real capacity, certainly not in production environments.
 
+## Features
+- Static file routing and serving
+- Keep-Alive
+- ETag caching using FNV hash
+- Editable text config
+- gzip compression
 
 ## Quick start
 ```bash
