@@ -15,7 +15,6 @@ type Request struct {
 	Method string
 	Path string
 	Headers http.Header
-	LocalFilePath string
 }
 
 func parseRequest(reader *bufio.Reader) (Request, error) {
@@ -51,14 +50,13 @@ func parseRequest(reader *bufio.Reader) (Request, error) {
 		decodedPath = "/index.html"
 	}
 
+	// Clean the path to prevent path traversal attacks and other URL shenanigans
 	cleanPath := filepath.Clean(decodedPath)
-	localFilePath := filepath.Join(DOCUMENT_ROOT, cleanPath)
 
 	return Request{
 		Method: method,
 		Path: cleanPath,
 		Headers: headers,
-		LocalFilePath: localFilePath,
 	}, nil
 }
 

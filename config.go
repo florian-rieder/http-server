@@ -12,6 +12,7 @@ type Config struct {
 	document_root               string
 	timeout                     int
 	max_requests_per_connection int
+	use_strong_etag             bool
 }
 
 func loadConfig(config_path string) Config {
@@ -48,6 +49,11 @@ func loadConfig(config_path string) Config {
 			c.max_requests_per_connection, err = strconv.Atoi(value)
 			if err != nil {
 				log.Fatalf("Invalid max requests per connection: %s", value)
+			}
+		case "UseStrongEtag":
+			c.use_strong_etag, err = strconv.ParseBool(value)
+			if err != nil {
+				log.Fatalf("Invalid use strong etag: %s", value)
 			}
 		default:
 			log.Fatalf("Invalid config key: %s", key)

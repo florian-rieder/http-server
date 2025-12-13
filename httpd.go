@@ -72,7 +72,7 @@ func handleConnection(conn net.Conn, config Config) {
 		}
 
 		// 2) Get information about the targeted resource
-		resourceInfo, err := getResourceInfo(request.LocalFilePath)
+		resourceInfo, err := getResourceInfo(request.Path, config)
 		if os.IsNotExist(err) {
 			log.Printf("404 found by getResourceInfo: %v", err)
 			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n<h1>404 Not Found</h1>\r\n\r\n"))
@@ -94,7 +94,7 @@ func handleConnection(conn net.Conn, config Config) {
 		encoding := "identity"
 		status := 200
 
-		fileContent, err := os.ReadFile(request.LocalFilePath)
+		fileContent, err := os.ReadFile(resourceInfo.LocalFilePath)
 		if err != nil {
 			conn.Write([]byte("HTTP/1.1 500 Internal Server Error\r\n\r\n<h1>500 Internal Server Error</h1>\r\n\r\n"))
 			return

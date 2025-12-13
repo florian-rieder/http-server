@@ -22,17 +22,22 @@ type ResourceInfo struct {
 	IsWritable bool
 }
 
-func getResourceInfo(path string) (ResourceInfo, error) {
-	fileInfo, err := os.Stat(path)
+func getResourceInfo(path string, config Config) (ResourceInfo, error) {
+	localFilePath := filepath.Join(config.document_root, path)
+	fileInfo, err := os.Stat(localFilePath)
+	if err != nil {
+		return ResourceInfo{}, err
+	}
 
+	etag, err := generateETag(localFilePath, fileInfo.ModTime(), config)
 	if err != nil {
 		return ResourceInfo{}, err
 	}
 
 	return ResourceInfo{
-		LocalFilePath: path,
+		LocalFilePath: localFilePath,
 		ContentType: mime.TypeByExtension(filepath.Ext(path)),
-		ETag: generateETag(path, fileInfo.ModTime()),
+		ETag: etag,
 		LastModified: fileInfo.ModTime(),
 		IsDirectory: fileInfo.IsDir(),
 		IsFile: !fileInfo.IsDir(),
@@ -43,9 +48,20 @@ func getResourceInfo(path string) (ResourceInfo, error) {
 	}, nil
 }
 
-func generateETag(path string, lastModified time.Time) string {
-	// Generate an ETag based on the path and the last modified time
-	return fmt.Sprintf("\"%x\"", getFNVHash([]byte(fmt.Sprintf("%d-%s", lastModified.Unix(), path))))
+func generateETag(path string, lastModified time.Time, config Config) (string, error) {
+	if config.use_strong_etag {
+		// Read file content and hash it
+		fileContent, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+
+		// Strong etag, worse performance (since we have to read the file) but more accurate.
+		return fmt.Sprintf("\"%x\"", getFNVHash(fileContent)), nil
+	} else {
+		// Generate an ETag based on the path and the last modified time (weak etag)
+		return fmt.Sprintf("W/\"%x\"", getFNVHash([]byte(fmt.Sprintf("%d-%s", lastModified.Unix(), path)))), nil
+	}
 }
 
 func getFNVHash(blob []byte) uint64 {
