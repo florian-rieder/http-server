@@ -10,7 +10,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log"
 	"mime"
@@ -30,24 +29,28 @@ const MAX_REQUESTS = 100
 
 func main() {
 
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", PORT))
+	config := loadConfig("./main.conf")
+
+	fmt.Printf("Port: %d; Root: %s; Timeout: %d; Max Requests: %d\n", config.port, config.document_root, config.timeout, config.max_requests_per_connection)
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", config.port))
 	if err != nil {
 		// handle error
 		log.Fatal(err)
 	}
-	log.Printf("Server is up ! Go to http://localhost:%d", PORT)
+	log.Printf("Server is up ! Go to http://localhost:%d", config.port)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			// handle error
-			log.Fatal(err)
+			// handle errors
+			log.Println(err)
+			continue
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, config)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, config Config) {
 	// Close the connection when the function finishes
 	defer conn.Close()
 
@@ -55,20 +58,20 @@ func handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	// Set initial timeout
-	conn.SetReadDeadline(time.Now().Add(TIMEOUT * time.Second))
+	conn.SetReadDeadline(time.Now().Add(time.Duration(config.timeout) * time.Second))
 
 	// Loop requests over the connection for Keep-Alive
-	for requestCounter := 0; requestCounter < MAX_REQUESTS; requestCounter++ {
+	for requestCounter := 0; requestCounter < config.max_requests_per_connection; requestCounter++ {
 		status := 200
 
 		// Read the Request-Line (e.g., "GET /hello.txt HTTP/1.1")
 		requestLine, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				// if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// 	log.Printf("Timeout reading from connection")
-				// 	return
-				// }
+				// Timeouts are expected when connections are idle - don't log them
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					return
+				}
 				log.Printf("Error reading from connection: %v", err)
 			} else {
 				log.Printf("Unexpected EOF in request-line")
@@ -165,9 +168,11 @@ func handleConnection(conn net.Conn) {
 		// Access log
 		fmt.Printf("[%s] %s - %s %d - %s\n", time.Now().Format(time.RFC3339), conn.RemoteAddr(), method, status, decodedPath)
 
+		now := time.Now().UTC().Format(time.RFC1123)
 		responseHeaders := http.Header{}
 		responseHeaders.Add("Server", "flo's mini httpd")
-		responseHeaders.Add("Date", time.Now().UTC().Format(time.RFC1123))
+		responseHeaders.Add("Date", now)
+		responseHeaders.Add("Expires", now)
 		responseHeaders.Add("Content-Type", contentType)
 
 		if etag != "" {
@@ -177,7 +182,7 @@ func handleConnection(conn net.Conn) {
 		// Set keep-alive header
 		if headers.Get("Connection") == "keep-alive" {
 			responseHeaders.Add("Connection", "keep-alive")
-			responseHeaders.Add("Keep-Alive", fmt.Sprintf("timeout=%d, max=%d", TIMEOUT, MAX_REQUESTS))
+			responseHeaders.Add("Keep-Alive", fmt.Sprintf("timeout=%d, max=%d", config.timeout, config.max_requests_per_connection))
 		} else {
 			responseHeaders.Add("Connection", "close")
 		}
@@ -192,78 +197,6 @@ func handleConnection(conn net.Conn) {
 		}
 
 		// Set additional timeout to wait for the next request
-		conn.SetReadDeadline(time.Now().Add(TIMEOUT * time.Second))
+		conn.SetReadDeadline(time.Now().Add(time.Duration(config.timeout) * time.Second))
 	}
-}
-
-func readHeaders(reader *bufio.Reader) http.Header {
-	headers := http.Header{}
-
-	fmt.Printf("%s", headers)
-
-	// Process the headers
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			// Check for error conditions
-			if err != io.EOF {
-				log.Printf("Error reading from connection: %v", err)
-			}
-			break
-		}
-
-		// Remove newline
-		line = strings.TrimSpace(line)
-
-		log.Printf(line)
-
-		// Empty line means we reached the end of the headers (since we removed CRLF with the trim)
-		if line == "" {
-			break
-		}
-
-		// Get KV pair
-		// Split in exactly two parts because there might be colons in the values (cookies, user agent, etc)
-		headerSlice := strings.SplitN(line, ":", 2)
-
-		if len(headerSlice) != 2 {
-			log.Printf("Incorrect header slice (%d parts)", len(headerSlice))
-			return nil
-		}
-
-		key := strings.TrimSpace(headerSlice[0])
-		value := strings.TrimSpace(headerSlice[1])
-
-		headers.Add(key, value)
-	}
-
-	return headers
-}
-
-func buildResponse(status int, body []byte, responseHeaders http.Header) []byte {
-	header := fmt.Sprintf("HTTP/1.1 %d %s\r\n"+
-		"Content-Length: %d\r\n",
-		status,
-		http.StatusText(status),
-		len(body),
-	)
-
-	if responseHeaders != nil {
-		for key, value := range responseHeaders {
-			header += fmt.Sprintf("%s: %s\r\n", key, value[0])
-		}
-	}
-
-	// Signify the end of the header section using CRLF
-	header += "\r\n"
-
-	return append([]byte(header), body...)
-}
-
-func getFNVHash(blob []byte) uint64 {
-	// Fast non cryptographic hash
-	// https://hackernoon.com/modern-hashing-with-go-a-guide
-	h := fnv.New64a()
-	h.Write(blob)
-	return h.Sum64()
 }
