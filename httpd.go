@@ -127,6 +127,7 @@ func handleConnection(conn net.Conn, config Config) {
 		cleanPath := filepath.Clean(decodedPath)
 		localFilePath := filepath.Join(DOCUMENT_ROOT, cleanPath)
 		etag := ""
+		gzipCompressed := false
 
 		fileContent, err := os.ReadFile(localFilePath)
 		if err != nil {
@@ -163,6 +164,21 @@ func handleConnection(conn net.Conn, config Config) {
 					fileContent = []byte("") // Ensure no body is sent
 				}
 			}
+
+			// Check if the client accepts gzip compression
+			acceptedEncodings := strings.Split(headers.Get("Accept-Encoding"), ",")
+			for _, encoding := range acceptedEncodings {
+				encoding = strings.TrimSpace(encoding)
+				if encoding == "gzip" {
+					compressedContent, err := gzipBytes(fileContent)
+					if err != nil {
+						log.Printf("Error compressing response: %v", err)
+					}
+					fileContent = compressedContent
+					gzipCompressed = true
+					break
+				}
+			}
 		}
 
 		// Access log
@@ -177,6 +193,13 @@ func handleConnection(conn net.Conn, config Config) {
 
 		if etag != "" {
 			responseHeaders.Add("ETag", etag)
+		}
+
+		// If the file was compressed, add the appropriate headers to tell the client
+		// how to decompress it.
+		if gzipCompressed {
+			responseHeaders.Add("Content-Encoding", "gzip")
+			responseHeaders.Add("Vary", "Accept-Encoding")
 		}
 
 		// Set keep-alive header
