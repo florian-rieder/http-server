@@ -59,23 +59,23 @@ func handleConnection(conn net.Conn, config Config) {
 				return
 			}
 			log.Printf("Error parsing request: %v", err)
-			serveErrorDocument(conn, 400) // Bad Request
+			serveErrorDocument(conn, config, 400) // Bad Request
 			return
 		}
 
 		// 2) Get information about the targeted resource
 		resourceInfo, err := getResourceInfo(request.Path, config)
 		if os.IsNotExist(err) {
-			serveErrorDocument(conn, 404) // Not Found
+			serveErrorDocument(conn, config, 404) // Not Found
 			return
 		}
 		if os.IsPermission(err) {
-		 	serveErrorDocument(conn, 404) // Forbidden, but maybe don't tell them ?
+		 	serveErrorDocument(conn, config, 404) // Forbidden, but maybe don't tell them ?
 			return
 		}
 		if err != nil {
 			log.Printf("Error getting resource info: %v", err)
-			serveErrorDocument(conn, 500) // Internal Server Error
+			serveErrorDocument(conn, config, 500) // Internal Server Error
 			return
 		}
 

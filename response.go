@@ -103,9 +103,27 @@ func buildResponse(status int, body []byte, responseHeaders http.Header) []byte 
 	return response
 }
 
-func serveErrorDocument(conn net.Conn, status int) {
+func serveErrorDocument(conn net.Conn, config Config, status int) {
 	statusText := http.StatusText(status)
+
+	// Default body; simple, efficient, refined.
 	body := fmt.Sprintf("<h1>%d %s</h1>\r\n", status, statusText)
+
+	// If an error document is configured, use it instead of the default body
+	switch status {
+	case 403:
+		if config.error_document_403 != "" {
+			body = readErrorDocument(config.error_document_403)
+		}
+	case 404:
+		if config.error_document_404 != "" {
+			body = readErrorDocument(config.error_document_404)
+		}
+	case 500:
+		if config.error_document_500 != "" {
+			body = readErrorDocument(config.error_document_500)
+		}
+	}
 
 	responseHeaders := http.Header{}
 	responseHeaders.Add("Server", "flo's mini httpd")
@@ -115,4 +133,13 @@ func serveErrorDocument(conn net.Conn, status int) {
 
 	response := buildResponse(status, []byte(body), responseHeaders)
 	conn.Write([]byte(response))
+}
+
+func readErrorDocument(path string) string {
+	fileContent, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("Error reading error document: %v", err)
+		return ""
+	}
+	return string(fileContent)
 }
